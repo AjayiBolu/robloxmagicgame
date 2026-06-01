@@ -42,8 +42,10 @@ local MatchFound       = MatchEvents:WaitForChild("MatchFound")
 local MatchStateUpdate = MatchEvents:WaitForChild("MatchStateUpdate")
 local MatchOver        = MatchEvents:WaitForChild("MatchOver")
 local ActionFailed     = MatchEvents:WaitForChild("ActionFailed")
+local TriggerCutscene  = MatchEvents:WaitForChild("TriggerCutscene")
 
-local BattleUI = require(script.Parent.BattleUI)
+local BattleUI       = require(script.Parent.BattleUI)
+local CutscenePlayer = require(script.Parent.CutscenePlayer)
 
 -- ── LOCAL STATE ────────────────────────────────────────────────
 local inMatch     = false
@@ -246,11 +248,23 @@ MatchFound.OnClientEvent:Connect(function(data)
     if matchPanel then matchPanel.Enabled = false end
 
     print("[MatchClient] Match found! Opponent:", data.opponentName, "| I am:", myPlayerKey)
-    BattleUI.open(MatchClient)
+    BattleUI.open(MatchClient, {
+        playerName     = data.playerName,
+        opponentName   = data.opponentName,
+        playerSkinId   = data.playerSkinId,
+        opponentSkinId = data.opponentSkinId,
+    })
 end)
 
 MatchStateUpdate.OnClientEvent:Connect(function(snapshot)
     BattleUI.update(snapshot, MatchClient)
+end)
+
+-- Cosmetic cutscene cue. State has already been applied via MatchStateUpdate
+-- (server always fires state first). CutscenePlayer decides whether to play
+-- it based on this player's local settings; skipping is local-only.
+TriggerCutscene.OnClientEvent:Connect(function(payload)
+    CutscenePlayer.handle(payload)
 end)
 
 MatchOver.OnClientEvent:Connect(function(winnerUserId)

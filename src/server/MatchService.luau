@@ -27,6 +27,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared     = ReplicatedStorage:WaitForChild("Shared")
 local CardSystem = require(Shared:WaitForChild("CardSystem"))
 local GameState  = require(Shared:WaitForChild("GameState"))
+local BoardSkinRegistry = require(Shared:WaitForChild("BoardSkinRegistry"))
+
+-- Resolve a deck's equipped board skin, falling back to the default.
+-- Skin equipping isn't persisted yet (out of scope) so this is "default"
+-- in practice, but the plumbing carries it end-to-end already.
+local function deckSkinId(deck)
+    return (deck and deck.equippedSkinId) or BoardSkinRegistry.DEFAULT_SKIN_ID
+end
 
 -- ── IN-MEMORY STATE ────────────────────────────────────────────
 -- Queue of players waiting for a match (list of Player objects)
@@ -70,6 +78,17 @@ local function broadcastState(match, remotes)
     )
 end
 
+-- Fire a cosmetic cutscene cue to BOTH match participants.
+-- State is ALWAYS broadcast before this is called — the cutscene is purely
+-- cosmetic and never gates game progress. Each client decides (from its own
+-- local settings) whether to actually play it or silently drop it.
+-- payload: { cardId, cutsceneType = "cardPlay"|"cardIntro"|"win"|"loss", actorKey }
+local function fireCutscene(match, remotes, payload)
+    if not remotes.TriggerCutscene then return end
+    remotes.TriggerCutscene:FireClient(match.p1, payload)
+    remotes.TriggerCutscene:FireClient(match.p2, payload)
+end
+
 -- Notify both players that the match ended
 local function broadcastMatchOver(match, remotes)
     local winner = match.state.winner
@@ -78,6 +97,14 @@ local function broadcastMatchOver(match, remotes)
 
     remotes.MatchOver:FireClient(match.p1, winnerUserId)
     remotes.MatchOver:FireClient(match.p2, winnerUserId)
+
+    -- Cosmetic win/loss cinematics — fired AFTER MatchOver so state leads.
+    -- Each participant gets the type that matches their result.
+    local loser = winner == "p1" and "p2" or "p1"
+    if remotes.TriggerCutscene then
+        remotes.TriggerCutscene:FireClient(match[winner], { cutsceneType = "win",  actorKey = "victory" })
+        remotes.TriggerCutscene:FireClient(match[loser],  { cutsceneType = "loss", actorKey = "defeat"  })
+    end
 
     -- Clean up
     activeMatches[match.matchId] = nil
@@ -109,9 +136,30 @@ local function createMatch(p1, p2, p1Deck, p2Deck, remotes)
 
     print("[MatchService] Match created:", matchId)
 
-    -- Tell clients they are in a match and who they're facing
-    remotes.MatchFound:FireClient(p1, { matchId = matchId, opponentName = p2.Name, playerKey = "p1" })
-    remotes.MatchFound:FireClient(p2, { matchId = matchId, opponentName = p1.Name, playerKey = "p2" })
+    -- Each player's equipped board skin — sent to BOTH clients so each can
+    -- render the opponent's half with their skin immediately on match start.
+    local p1Skin = deckSkinId(p1Deck)
+    local p2Skin = deckSkinId(p2Deck)
+
+    -- Tell clients they are in a match and who they're facing.
+    -- playerSkinId   = the recipient's own skin
+    -- opponentSkinId = the other player's skin
+    remotes.MatchFound:FireClient(p1, {
+        matchId        = matchId,
+        opponentName   = p2.Name,
+        playerName     = p1.Name,
+        playerKey      = "p1",
+        playerSkinId   = p1Skin,
+        opponentSkinId = p2Skin,
+    })
+    remotes.MatchFound:FireClient(p2, {
+        matchId        = matchId,
+        opponentName   = p1.Name,
+        playerName     = p2.Name,
+        playerKey      = "p2",
+        playerSkinId   = p2Skin,
+        opponentSkinId = p1Skin,
+    })
 
     -- Send initial game state to both players
     broadcastState(match, remotes)
@@ -237,6 +285,15 @@ function MatchService.start(remotes, deckService)
             broadcastMatchOver(match, remotes)
         else
             broadcastState(match, remotes)
+
+            -- Cosmetic cue — state is already delivered above. Both clients
+            -- decide whether to play it based on their local settings + the
+            -- card's rarity. actorKey lets the client pick the right visuals.
+            fireCutscene(match, remotes, {
+                cardId       = cardId,
+                cutsceneType = "cardPlay",
+                actorKey     = cardData.id,
+            })
         end
     end)
 

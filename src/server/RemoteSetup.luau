@@ -46,6 +46,7 @@ local MATCH_REMOTES = {
     MatchStateUpdate = "RemoteEvent",   -- full snapshot of game state
     MatchOver        = "RemoteEvent",   -- winnerUserId
     ActionFailed     = "RemoteEvent",   -- reason string (invalid action feedback)
+    TriggerCutscene  = "RemoteEvent",   -- { cardId, cutsceneType, actorKey } cosmetic cinematic cue
 
     -- Client → Server (request/response)
     GetMatchState    = "RemoteFunction", -- request a fresh state snapshot
